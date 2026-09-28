@@ -299,6 +299,12 @@ enterBtn.addEventListener('click', async () => {
 const viewerPos = new THREE.Vector3(0, 1.6, 0);
 const tmpM = new THREE.Matrix4();
 
+function samePolygon(a, b) {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i].distanceToSquared(b[i]) > 0.0004) return false; // 2 cm
+  return true;
+}
+
 function syncPlanes(frame) {
   const ref = renderer.xr.getReferenceSpace();
   const planes = frame.detectedPlanes;
@@ -312,14 +318,29 @@ function syncPlanes(frame) {
       tmpM.fromArray(pose.transform.matrix);
       const pts = plane.polygon.map((p) => new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(tmpM));
       if (known) {
+        // Quest bumps lastChangedTime even when nothing really moved. Only rebuild if the
+        // outline actually shifted, and keep whatever scene was on it.
+        known.changed = plane.lastChangedTime;
+        if (samePolygon(known.pts, pts)) continue;
+        const keepId = known.surface.portal?.id;
         clearPortal(known.surface);
         surfaceRoot.remove(known.surface.outline, known.surface.fill);
         surfaces.splice(surfaces.indexOf(known.surface), 1);
+        if (picker.surface === known.surface) picker.close();
+        const s = buildSurface(pts, plane.semanticLabel || plane.orientation, viewerPos);
+        if (s) {
+          addSurface(s);
+          if (keepId) assign(s, keepId);
+          planesSeen.set(plane, { surface: s, changed: plane.lastChangedTime, pts });
+        } else {
+          planesSeen.delete(plane);
+        }
+        continue;
       }
       const s = buildSurface(pts, plane.semanticLabel || plane.orientation, viewerPos);
       if (s) {
         addSurface(s);
-        planesSeen.set(plane, { surface: s, changed: plane.lastChangedTime });
+        planesSeen.set(plane, { surface: s, changed: plane.lastChangedTime, pts });
       }
     }
   } else if (performance.now() - sessionStart > 2500 && surfaces.length === 0 && !usingFake) {
