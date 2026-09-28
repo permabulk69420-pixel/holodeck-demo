@@ -54,7 +54,8 @@ const OPTIONS = [
   { id: 'stars', title: 'Stars', sub: 'far · cubemap' },
   { id: 'fish', title: 'Fish tank', sub: 'near · live 3D' },
   { id: 'fishStatic', title: 'Fish tank', sub: 'as cubemap (compare)' },
-  { id: 'clear', title: 'Clear', sub: 'back to your real wall' },
+  { id: 'follow', title: 'Same as wall', sub: 'use the wall\'s scene', childOnly: true },
+  { id: 'clear', title: 'Clear', sub: 'show the real thing' },
 ];
 
 // ---------- surfaces ----------
@@ -68,6 +69,27 @@ function addSurface(s) {
   surfaces.push(s);
   surfaceRoot.add(s.outline, s.fill);
   s.fill.userData.surface = s;
+  resolveParents();
+}
+
+// Doors, windows, wall art etc. sit flat on a wall. Link each one to its wall so by
+// default it just shows the wall's scene; it can still be given its own scene or cleared.
+function resolveParents() {
+  for (const s of surfaces) s.parent = null;
+  for (const s of surfaces) {
+    let best = null;
+    for (const w of surfaces) {
+      if (w === s) continue;
+      if (w.width * w.height <= s.width * s.height) continue;
+      if (w.normal.dot(s.normal) < 0.97) continue;
+      const d = s.center.clone().sub(w.center);
+      if (Math.abs(d.dot(w.normal)) > 0.15) continue; // not on that wall's plane
+      if (Math.abs(d.dot(w.right)) > w.width / 2 + 0.05) continue;
+      if (Math.abs(d.dot(w.up)) > w.height / 2 + 0.05) continue;
+      if (!best || w.width * w.height < best.width * best.height) best = w;
+    }
+    s.parent = best;
+  }
 }
 function clearSurfaces() {
   for (const s of surfaces) clearPortal(s);
@@ -88,17 +110,33 @@ const updaters = new Set();
 
 function clearPortal(s) {
   if (!s.portal) return;
-  portalRoot.remove(s.portal.mask, s.portal.content);
+  portalRoot.remove(s.portal.mask);
+  if (s.portal.content) portalRoot.remove(s.portal.content);
   if (s.portal.update) updaters.delete(s.portal.update);
-  releaseRef(s.portal.ref);
+  if (s.portal.ref) releaseRef(s.portal.ref);
   s.portal = null;
+}
+
+// Masks for doors/windows draw after their wall's mask, so they win inside their outline.
+function maskOrder(s) {
+  return s.parent ? 1.5 : 1;
 }
 
 function assign(s, id) {
   clearPortal(s);
-  if (id === 'clear') return;
+  if (id === 'follow') return; // no mask of its own: the wall's scene shows through
+  if (id === 'clear') {
+    if (!s.parent) return;
+    // stencil 0 over the door/window = nothing drawn there = the real one shows
+    const mask = makeMask(s.geometry, 0);
+    mask.renderOrder = maskOrder(s);
+    portalRoot.add(mask);
+    s.portal = { ref: null, mask, content: null, update: null, id };
+    return;
+  }
   const ref = allocRef();
   const mask = makeMask(s.geometry, ref);
+  mask.renderOrder = maskOrder(s);
   let content, update = null;
   if (id === 'fish') {
     const tank = buildFishTank(s.width, s.height, 2.4, ref);
@@ -126,7 +164,7 @@ raycaster.params.Line.threshold = 0;
 function pick(origin, dir) {
   raycaster.set(origin, dir);
   if (picker.group.visible) {
-    const hit = raycaster.intersectObjects(picker.buttons, false)[0];
+    const hit = raycaster.intersectObjects(picker.buttons.filter((b) => b.visible), false)[0];
     if (hit) return { button: hit.object, point: hit.point, distance: hit.distance };
   }
   const hit = raycaster.intersectObjects(surfaces.map((s) => s.fill), false)[0];
@@ -158,7 +196,7 @@ function select(hit, viewerPos) {
     if (picker.surface) assign(picker.surface, hit.button.userData.opt.id);
     picker.close();
   } else if (hit?.surface) {
-    picker.openFor(hit.surface, hit.point, viewerPos);
+    picker.openFor(hit.surface, hit.point, viewerPos, !!hit.surface.parent);
   } else {
     picker.close();
   }
@@ -376,6 +414,7 @@ if (params.has('demo')) {
   assign(right, 'mountains');
   assign(left, 'fishStatic');
   assign(ceiling, 'stars');
+  if (params.get('win')) assign(surfaces[6], params.get('win'));
 }
 if (params.has('yaw')) yaw = parseFloat(params.get('yaw'));
 if (params.has('pitch')) pitch = parseFloat(params.get('pitch'));
@@ -406,7 +445,8 @@ renderer.setAnimationLoop((time, frame) => {
 
   // cube windows sit around the viewer so they behave like distant views
   for (const s of surfaces) {
-    if (s.portal?.content.userData.followCamera) s.portal.content.position.copy(viewerPos);
+    if (s.portal) s.portal.mask.renderOrder = maskOrder(s);
+    if (s.portal?.content?.userData.followCamera) s.portal.content.position.copy(viewerPos);
   }
   for (const u of updaters) u(t);
 

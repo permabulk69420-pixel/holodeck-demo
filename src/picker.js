@@ -38,17 +38,22 @@ export class Picker {
         new THREE.PlaneGeometry(W, H),
         new THREE.MeshBasicMaterial({ map: normal, transparent: true, depthTest: false }),
       );
-      mesh.position.y = -i * (H + gap);
       mesh.renderOrder = 10;
       mesh.userData = { opt, normal, hover };
       this.group.add(mesh);
       this.buttons.push(mesh);
     });
     this.surface = null;
+    this.rowH = H + gap;
   }
 
-  openFor(surface, hitPoint, viewerPos) {
+  openFor(surface, hitPoint, viewerPos, isChild = false) {
     this.surface = surface;
+    let row = 0;
+    for (const b of this.buttons) {
+      b.visible = !b.userData.opt.childOnly || isChild;
+      if (b.visible) b.position.y = -row++ * this.rowH;
+    }
     // float ~0.6 m in front of you, toward the spot you clicked
     const dir = hitPoint.clone().sub(viewerPos).normalize();
     const p = viewerPos.clone().addScaledVector(dir, 0.6);

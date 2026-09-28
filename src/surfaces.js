@@ -105,5 +105,7 @@ export function fakeRoomPolys(center, w = 4.2, d = 4.8, h = 2.6) {
     { label: 'wall', pts: [V(x0, 0, z1), V(x0, 0, z0), V(x0, h, z0), V(x0, h, z1)] },
     { label: 'floor', pts: [V(x0, 0, z0), V(x0, 0, z1), V(x1, 0, z1), V(x1, 0, z0)] },
     { label: 'ceiling', pts: [V(x0, h, z0), V(x1, h, z0), V(x1, h, z1), V(x0, h, z1)] },
+    // a window on the first wall, like the ones the room scan reports
+    { label: 'window frame', pts: [V(center.x - 0.6, 0.9, z0 + 0.01), V(center.x + 0.6, 0.9, z0 + 0.01), V(center.x + 0.6, 2.0, z0 + 0.01), V(center.x - 0.6, 2.0, z0 + 0.01)] },
   ];
 }
