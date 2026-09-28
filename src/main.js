@@ -57,6 +57,7 @@ const OPTIONS = [
   { id: 'fish', title: 'Fish tank', sub: 'near · live 3D' },
   { id: 'fishStatic', title: 'Fish tank', sub: 'as cubemap (compare)' },
   { id: 'follow', title: 'Same as wall', sub: 'use the wall\'s scene', childOnly: true },
+  { id: 'justChild', title: 'Just this part', sub: 'only the window / door', withChild: true },
   { id: 'clear', title: 'Clear', sub: 'show the real thing' },
 ];
 
@@ -126,6 +127,7 @@ function maskOrder(s) {
 
 function assign(s, id) {
   clearPortal(s);
+  if (!s.parent) for (const c of surfaces) if (c.parent === s) clearPortal(c);
   if (id === 'follow') return; // no mask of its own: the wall's scene shows through
   if (id === 'clear') {
     if (!s.parent) return;
@@ -204,10 +206,19 @@ function applyHover(hits) {
 
 function select(hit, viewerPos) {
   if (hit?.button) {
-    if (picker.surface) assign(picker.surface, hit.button.userData.opt.id);
+    const id = hit.button.userData.opt.id;
+    if (id === 'justChild' && picker.child) {
+      // switch the menu to just the window/door that was under the pointer
+      picker.openFor(picker.child, picker.anchor, viewerPos, { isChild: true });
+      return;
+    }
+    if (picker.surface) assign(picker.surface, id);
     picker.close();
   } else if (hit?.surface) {
-    picker.openFor(hit.surface, hit.point, viewerPos, !!hit.surface.parent);
+    // Clicking a window/door picks its whole wall by default; "Just this part" narrows it.
+    const s = hit.surface;
+    if (s.parent) picker.openFor(s.parent, hit.point, viewerPos, { child: s });
+    else picker.openFor(s, hit.point, viewerPos, {});
   } else {
     picker.close();
   }

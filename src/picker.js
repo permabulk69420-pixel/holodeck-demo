@@ -47,11 +47,16 @@ export class Picker {
     this.rowH = H + gap;
   }
 
-  openFor(surface, hitPoint, viewerPos, isChild = false) {
+  // opts.isChild: editing a window/door on its own (shows "Same as wall")
+  // opts.child:   editing a wall that was clicked through a window/door (shows "Just this part")
+  openFor(surface, hitPoint, viewerPos, opts = {}) {
     this.surface = surface;
+    this.child = opts.child || null;
+    this.anchor = hitPoint.clone();
     let row = 0;
     for (const b of this.buttons) {
-      b.visible = !b.userData.opt.childOnly || isChild;
+      const o = b.userData.opt;
+      b.visible = (!o.childOnly || !!opts.isChild) && (!o.withChild || !!opts.child);
       if (b.visible) b.position.y = -row++ * this.rowH;
     }
     // float ~0.6 m in front of you, toward the spot you clicked
