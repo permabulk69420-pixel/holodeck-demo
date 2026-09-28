@@ -49,6 +49,7 @@ export class Picker {
 
   // opts.isChild: editing a window/door on its own (shows "Same as wall")
   // opts.child:   editing a wall that was clicked through a window/door (shows "Just this part")
+  // opts.hasScene: the surface already shows a scene (shows "Fill whole room" / "Clear whole room")
   openFor(surface, hitPoint, viewerPos, opts = {}) {
     this.surface = surface;
     this.child = opts.child || null;
@@ -56,7 +57,7 @@ export class Picker {
     let row = 0;
     for (const b of this.buttons) {
       const o = b.userData.opt;
-      b.visible = (!o.childOnly || !!opts.isChild) && (!o.withChild || !!opts.child);
+      b.visible = (!o.childOnly || !!opts.isChild) && (!o.withChild || !!opts.child) && (!o.needsScene || !!opts.hasScene);
       if (b.visible) b.position.y = -row++ * this.rowH;
     }
     // float ~0.6 m in front of you, toward the spot you clicked

@@ -3,8 +3,8 @@ import { buildSurface, fakeRoomPolys } from './surfaces.js';
 import { allocRef, releaseRef, makeMask, stencilize, makeCubeWindow } from './portals.js';
 import { captureCube, buildMountains, buildStars } from './scenes/far.js';
 import { buildFishTank } from './scenes/fishtank.js';
-import { buildSpaceWindow } from './scenes/space.js';
-import { buildCityWindow } from './scenes/city.js';
+import { buildSpaceScene } from './scenes/space.js';
+import { buildCityScene } from './scenes/city.js';
 import { Picker } from './picker.js';
 
 const statusEl = document.getElementById('status');
@@ -52,15 +52,17 @@ const cubes = {
 }
 
 const OPTIONS = [
-  { id: 'space', title: 'Spaceship window', sub: 'Blender render + live 3D' },
   { id: 'city', title: 'Night city', sub: '40th floor, rain · Blender + live 3D' },
+  { id: 'space', title: 'Space', sub: 'ringed planet · Blender + live 3D' },
   { id: 'mountains', title: 'Mountains', sub: 'far · cubemap' },
   { id: 'stars', title: 'Stars', sub: 'far · cubemap' },
   { id: 'fish', title: 'Fish tank', sub: 'near · live 3D' },
   { id: 'fishStatic', title: 'Fish tank', sub: 'as cubemap (compare)' },
   { id: 'follow', title: 'Same as wall', sub: 'use the wall\'s scene', childOnly: true },
   { id: 'justChild', title: 'Just this part', sub: 'only the window / door', withChild: true },
+  { id: 'fillRoom', title: 'Fill whole room', sub: 'this scene on every surface', needsScene: true },
   { id: 'clear', title: 'Clear', sub: 'show the real thing' },
+  { id: 'clearRoom', title: 'Clear whole room', sub: 'back to your room', needsScene: true },
 ];
 
 // ---------- surfaces ----------
@@ -111,14 +113,66 @@ function useFakeRoom(center) {
 }
 
 // ---------- portals ----------
+// Most scenes are SHARED: one copy per room, which every surface showing it looks into
+// (all their stencil masks write the same value). The scene is locked to the room, with its
+// "front" out through the first surface it was put on, so every other wall shows its own
+// direction and a whole room can be opened up seamlessly. The fish tank is the exception:
+// it's a box behind one particular surface.
+const SHARED = new Set(['city', 'space', 'mountains', 'stars', 'fishStatic']);
+const shared = new Map(); // id -> { ref, content, update, users: Set<surface> }
 const updaters = new Set();
+
+// The scene's frame in the room: -z = straight out through surface s (kept level),
+// y = world up, origin at the viewer.
+function sceneFrame(s) {
+  const fwd = Math.abs(s.normal.y) < 0.7 ? s.normal.clone().negate() : s.up.clone();
+  fwd.y = 0;
+  if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+  fwd.normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  const back = fwd.clone().negate();
+  const right = new THREE.Vector3().crossVectors(up, back);
+  return new THREE.Matrix4().makeBasis(right, up, back).setPosition(viewerPos);
+}
+
+function getShared(id, s) {
+  let sh = shared.get(id);
+  if (sh) return sh;
+  const frame = sceneFrame(s);
+  const ref = allocRef();
+  let content, update = null;
+  if (id === 'city') ({ content, update } = buildCityScene(frame, ref));
+  else if (id === 'space') ({ content, update } = buildSpaceScene(frame, ref));
+  else content = makeCubeWindow(cubes[id], frame);
+  stencilize(content, ref);
+  portalRoot.add(content);
+  if (update) updaters.add(update);
+  sh = { ref, content, update, users: new Set() };
+  shared.set(id, sh);
+  return sh;
+}
+
+function releaseShared(id, s) {
+  const sh = shared.get(id);
+  if (!sh) return;
+  sh.users.delete(s);
+  if (sh.users.size) return;
+  portalRoot.remove(sh.content);
+  if (sh.update) updaters.delete(sh.update);
+  releaseRef(sh.ref);
+  shared.delete(id);
+}
 
 function clearPortal(s) {
   if (!s.portal) return;
   portalRoot.remove(s.portal.mask);
-  if (s.portal.content) portalRoot.remove(s.portal.content);
-  if (s.portal.update) updaters.delete(s.portal.update);
-  if (s.portal.ref) releaseRef(s.portal.ref);
+  if (s.portal.shared) {
+    releaseShared(s.portal.id, s);
+  } else {
+    if (s.portal.content) portalRoot.remove(s.portal.content);
+    if (s.portal.update) updaters.delete(s.portal.update);
+    if (s.portal.ref) releaseRef(s.portal.ref);
+  }
   s.portal = null;
 }
 
@@ -140,42 +194,41 @@ function assign(s, id) {
     s.portal = { ref: null, mask, content: null, update: null, id };
     return;
   }
+  if (SHARED.has(id)) {
+    const sh = getShared(id, s);
+    const mask = makeMask(s.geometry, sh.ref);
+    mask.renderOrder = maskOrder(s);
+    portalRoot.add(mask);
+    sh.users.add(s);
+    s.portal = { ref: sh.ref, mask, content: null, update: null, id, shared: true };
+    return;
+  }
+  // fish tank: its own box behind this surface
   const ref = allocRef();
   const mask = makeMask(s.geometry, ref);
   mask.renderOrder = maskOrder(s);
-  let content, update = null;
-  if (id === 'space') {
-    const sw = buildSpaceWindow(s.width, s.height, ref);
-    sw.far.material.uniforms.toLocal.value.setFromMatrix4(s.matrix).transpose();
-    sw.local.matrixAutoUpdate = false;
-    sw.local.matrix.copy(s.matrix);
-    sw.local.matrixWorldNeedsUpdate = true;
-    content = new THREE.Group();
-    content.add(sw.far, sw.group);
-    update = sw.update;
-  } else if (id === 'city') {
-    const cw = buildCityWindow(s.width, s.height, ref, s.matrix);
-    cw.local.matrixAutoUpdate = false;
-    cw.local.matrix.copy(s.matrix);
-    cw.local.matrixWorldNeedsUpdate = true;
-    content = new THREE.Group();
-    content.add(cw.far, cw.group);
-    update = cw.update;
-  } else if (id === 'fish') {
-    const tank = buildFishTank(s.width, s.height, 2.4, ref);
-    content = new THREE.Group();
-    content.matrixAutoUpdate = false;
-    content.matrix.copy(s.matrix);
-    content.matrixWorldNeedsUpdate = true;
-    content.add(tank.group);
-    update = tank.update;
-  } else {
-    content = makeCubeWindow(cubes[id], s.matrix);
-  }
+  const tank = buildFishTank(s.width, s.height, 2.4, ref);
+  const content = new THREE.Group();
+  content.matrixAutoUpdate = false;
+  content.matrix.copy(s.matrix);
+  content.matrixWorldNeedsUpdate = true;
+  content.add(tank.group);
   stencilize(content, ref);
   portalRoot.add(mask, content);
-  if (update) updaters.add(update);
-  s.portal = { ref, mask, content, update, id };
+  updaters.add(tank.update);
+  s.portal = { ref, mask, content, update: tank.update, id };
+}
+
+// Whole room: every wall, floor and ceiling shows the scene (doors/windows follow their wall).
+function hasScene(s) {
+  const id = s.portal?.id || s.parent?.portal?.id;
+  return !!id && id !== 'clear';
+}
+function fillRoom(id) {
+  for (const s of surfaces) if (!s.parent) assign(s, id);
+}
+function clearRoom() {
+  for (const s of surfaces) clearPortal(s);
 }
 
 // ---------- picker / input ----------
@@ -219,16 +272,23 @@ function select(hit, viewerPos) {
     const id = hit.button.userData.opt.id;
     if (id === 'justChild' && picker.child) {
       // switch the menu to just the window/door that was under the pointer
-      picker.openFor(picker.child, picker.anchor, viewerPos, { isChild: true });
+      picker.openFor(picker.child, picker.anchor, viewerPos, { isChild: true, hasScene: hasScene(picker.child) });
       return;
     }
-    if (picker.surface) assign(picker.surface, id);
+    if (id === 'fillRoom') {
+      const cur = picker.surface?.portal?.id || picker.surface?.parent?.portal?.id;
+      if (cur && cur !== 'clear') fillRoom(cur);
+    } else if (id === 'clearRoom') {
+      clearRoom();
+    } else if (picker.surface) {
+      assign(picker.surface, id);
+    }
     picker.close();
   } else if (hit?.surface) {
     // Clicking a window/door picks its whole wall by default; "Just this part" narrows it.
     const s = hit.surface;
-    if (s.parent) picker.openFor(s.parent, hit.point, viewerPos, { child: s });
-    else picker.openFor(s, hit.point, viewerPos, {});
+    if (s.parent) picker.openFor(s.parent, hit.point, viewerPos, { child: s, hasScene: hasScene(s.parent) });
+    else picker.openFor(s, hit.point, viewerPos, { hasScene: hasScene(s) });
   } else {
     picker.close();
   }
@@ -448,6 +508,8 @@ if (params.has('demo')) {
   assign(ceiling, 'stars');
   if (params.get('win')) assign(surfaces[6], params.get('win'));
 }
+// ?room=city opens the whole test room onto one scene
+if (params.get('room')) fillRoom(params.get('room'));
 if (params.has('yaw')) yaw = parseFloat(params.get('yaw'));
 if (params.has('pitch')) pitch = parseFloat(params.get('pitch'));
 if (params.has('x')) camera.position.x = parseFloat(params.get('x'));
@@ -475,14 +537,12 @@ renderer.setAnimationLoop((time, frame) => {
   }
   applyHover(hits);
 
-  // cube windows sit around the viewer so they behave like distant views
-  for (const s of surfaces) {
-    if (s.portal) s.portal.mask.renderOrder = maskOrder(s);
-    const c = s.portal?.content;
-    if (c) {
-      if (c.userData.followCamera) c.position.copy(viewerPos);
-      for (const k of c.children) if (k.userData.followCamera) k.position.copy(viewerPos);
-    }
+  // far layers sit around the viewer so they behave like distant views
+  for (const s of surfaces) if (s.portal) s.portal.mask.renderOrder = maskOrder(s);
+  for (const sh of shared.values()) {
+    const c = sh.content;
+    if (c.userData.followCamera) c.position.copy(viewerPos);
+    for (const k of c.children) if (k.userData.followCamera) k.position.copy(viewerPos);
   }
   for (const u of updaters) u(t);
 

@@ -11,7 +11,7 @@ Also writes OUT.json with the directions of the red aviation beacons on the tall
 so the three.js scene can blink live lights exactly on top of the static ones.
 
 Blender axes: +Y is "out the window" (three.js -Z), Z is up (three.js +Y), X is right (three.js +X).
-Usage: python3 render_city.py OUT.png WIDTH SAMPLES
+Usage: python3 render_city.py OUT.png WIDTH SAMPLES   (SAMPLES 0 = skip the render, just write the JSON)
 """
 import sys
 import json
@@ -607,22 +607,36 @@ for k, (sx, sy, sz, w_, d_) in enumerate(signs):
     ob.data.materials.append(m)
 
 # aviation beacons (static, dim; the live layer blinks on top of these). Only the tallest towers.
-beacons = sorted(beacons, key=lambda b: -b[2])[:48]
+all_towers = sorted(beacons, key=lambda b: -b[2])
+beacons = all_towers[:48]
 redm = material("beacon", red_light)
 for bx_, by_, bz_ in beacons:
     bpy.ops.mesh.primitive_uv_sphere_add(radius=1.6, location=(bx_, by_, bz_), segments=12, ring_count=6)
     bpy.context.active_object.data.materials.append(redm)
 
 scene.render.filepath = out
-bpy.ops.render.render(write_still=True)
-print("wrote", out)
+if SAMPLES > 0:
+    bpy.ops.render.render(write_still=True)
+    print("wrote", out)
 
-# beacon directions in three.js "window frame" coords: x right, y up, -z out the window
-dirs = []
-for bx_, by_, bz_ in beacons:
-    vx, vy, vz = bx_ - EYE[0], by_ - EYE[1], bz_ - EYE[2]
+# beacon directions in three.js "front" coords: x right, y up, -z = the front of the view
+def to_dir(b):
+    vx, vy, vz = b[0] - EYE[0], b[1] - EYE[1], b[2] - EYE[2]
     L = math.sqrt(vx * vx + vy * vy + vz * vz)
-    dirs.append([round(vx / L, 5), round(vz / L, 5), round(-vy / L, 5), round(L)])
+    return [round(vx / L, 5), round(vz / L, 5), round(-vy / L, 5), round(L)]
+
+
+dirs = [to_dir(b) for b in beacons]  # these also exist (dim) in the render
+# live-only beacons on the tallest towers in every other direction, spread out
+extra = []
+picked = [d[:3] for d in dirs]
+for b in all_towers[48:]:
+    d = to_dir(b)
+    if all(sum(a * c for a, c in zip(d[:3], q)) < 0.9985 for q in picked):  # ~3 degrees apart
+        extra.append(d)
+        picked.append(d[:3])
+    if len(extra) >= 90:
+        break
 with open(out.rsplit(".", 1)[0] + ".json", "w") as f:
-    json.dump({"eye_height": EYE[2], "beacons": dirs}, f)
-print("beacons", len(dirs))
+    json.dump({"eye_height": EYE[2], "beacons": dirs, "beacons_extra": extra}, f)
+print("beacons", len(dirs), "extra", len(extra))
