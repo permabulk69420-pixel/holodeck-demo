@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Holodeck Demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #121216; color: #ddd; font: 15px system-ui, sans-serif; overflow: hidden; }
+    canvas { display: block; }
+    #enter { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 14px 28px; font-size: 18px;
+      border: 0; border-radius: 12px; background: #fff; color: #111; cursor: pointer; }
+    #enter:disabled { opacity: .4; cursor: default; }
+    #status { position: fixed; left: 12px; top: 10px; opacity: .6; font-size: 13px; }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="status"></div>
+  <button id="enter" disabled>Checking XR…</button>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
