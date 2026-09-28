@@ -4,6 +4,7 @@ import { allocRef, releaseRef, makeMask, stencilize, makeCubeWindow } from './po
 import { captureCube, buildMountains, buildStars } from './scenes/far.js';
 import { buildFishTank } from './scenes/fishtank.js';
 import { buildSpaceWindow } from './scenes/space.js';
+import { buildCityWindow } from './scenes/city.js';
 import { Picker } from './picker.js';
 
 const statusEl = document.getElementById('status');
@@ -52,6 +53,7 @@ const cubes = {
 
 const OPTIONS = [
   { id: 'space', title: 'Spaceship window', sub: 'Blender render + live 3D' },
+  { id: 'city', title: 'Night city', sub: '40th floor, rain · Blender + live 3D' },
   { id: 'mountains', title: 'Mountains', sub: 'far · cubemap' },
   { id: 'stars', title: 'Stars', sub: 'far · cubemap' },
   { id: 'fish', title: 'Fish tank', sub: 'near · live 3D' },
@@ -151,6 +153,14 @@ function assign(s, id) {
     content = new THREE.Group();
     content.add(sw.far, sw.group);
     update = sw.update;
+  } else if (id === 'city') {
+    const cw = buildCityWindow(s.width, s.height, ref, s.matrix);
+    cw.local.matrixAutoUpdate = false;
+    cw.local.matrix.copy(s.matrix);
+    cw.local.matrixWorldNeedsUpdate = true;
+    content = new THREE.Group();
+    content.add(cw.far, cw.group);
+    update = cw.update;
   } else if (id === 'fish') {
     const tank = buildFishTank(s.width, s.height, 2.4, ref);
     content = new THREE.Group();
