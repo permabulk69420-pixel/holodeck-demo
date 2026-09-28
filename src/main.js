@@ -210,11 +210,51 @@ addEventListener('pointermove', (e) => {
   pitch = THREE.MathUtils.clamp(pitch - e.movementY * 0.004, -1.4, 1.4);
 });
 
+// ---------- in-headset status note ----------
+const note = (() => {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 160;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.64, 0.1),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false }),
+  );
+  mesh.renderOrder = 11;
+  mesh.visible = false;
+  scene.add(mesh);
+  return {
+    show(text) {
+      const g = c.getContext('2d');
+      g.clearRect(0, 0, c.width, c.height);
+      g.fillStyle = 'rgba(20,22,28,0.85)';
+      g.beginPath(); g.roundRect(4, 4, c.width - 8, c.height - 8, 40); g.fill();
+      g.fillStyle = '#fff';
+      g.font = '500 44px system-ui, sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(text, c.width / 2, c.height / 2);
+      tex.needsUpdate = true;
+      // 1 m in front of you, a bit below eye level
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(renderer.xr.getCamera().quaternion);
+      fwd.y = 0;
+      if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+      fwd.normalize();
+      mesh.position.copy(viewerPos).addScaledVector(fwd, 1.0);
+      mesh.position.y -= 0.25;
+      mesh.lookAt(viewerPos.x, mesh.position.y, viewerPos.z);
+      mesh.visible = true;
+    },
+    hide() { mesh.visible = false; },
+  };
+})();
+
 // ---------- XR session ----------
 let xrMode = null;
 let planesSeen = new Map(); // XRPlane -> { surface, changed }
 let sessionStart = 0;
 let usingFake = false;
+let roomCaptureAsked = false;
+let xrSession = null;
 
 async function detectXR() {
   if (!navigator.xr) return null;
@@ -241,11 +281,15 @@ enterBtn.addEventListener('click', async () => {
   clearSurfaces();
   planesSeen = new Map();
   usingFake = false;
+  roomCaptureAsked = false;
+  xrSession = session;
   sessionStart = performance.now();
   scene.background = null;
   renderer.setClearColor(0x000000, 0);
   await renderer.xr.setSession(session);
   session.addEventListener('end', () => {
+    note.hide();
+    xrSession = null;
     clearSurfaces();
     useFakeRoom(new THREE.Vector3());
     usingFake = true;
@@ -259,7 +303,7 @@ function syncPlanes(frame) {
   const ref = renderer.xr.getReferenceSpace();
   const planes = frame.detectedPlanes;
   if (planes && planes.size) {
-    if (usingFake) { clearSurfaces(); planesSeen = new Map(); usingFake = false; }
+    if (usingFake) { clearSurfaces(); planesSeen = new Map(); usingFake = false; note.hide(); }
     for (const plane of planes) {
       const known = planesSeen.get(plane);
       if (known && known.changed === plane.lastChangedTime) continue;
@@ -278,10 +322,16 @@ function syncPlanes(frame) {
         planesSeen.set(plane, { surface: s, changed: plane.lastChangedTime });
       }
     }
-  } else if (!usingFake && performance.now() - sessionStart > 3000 && surfaces.length === 0) {
-    // no room scan available: build a test room around where you're standing
+  } else if (performance.now() - sessionStart > 2500 && surfaces.length === 0 && !usingFake) {
+    // No room scan for this space. On Quest the browser can open Space Setup for us;
+    // once it's done the planes arrive and replace the test room automatically.
+    if (!roomCaptureAsked && xrSession && typeof xrSession.initiateRoomCapture === 'function') {
+      roomCaptureAsked = true;
+      xrSession.initiateRoomCapture().catch(() => {});
+    }
     useFakeRoom(new THREE.Vector3(viewerPos.x, 0, viewerPos.z));
     usingFake = true;
+    note.show(roomCaptureAsked ? 'No room scan yet: test room for now' : 'No room scan available: test room');
   }
 }
 
