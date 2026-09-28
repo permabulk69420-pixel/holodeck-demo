@@ -39,6 +39,22 @@ function getPano() {
   return panoTex;
 }
 
+// The panorama as an environment map (three turns it into prefiltered mips itself).
+// Its centre has to line up with "out the window": three's equirect puts +X at the centre
+// and +Z at u = 0.75, so rotate local (-z out, +x right) onto that.
+let envTex = null;
+function getEnv(surfaceMatrix) {
+  if (!envTex) {
+    envTex = new THREE.TextureLoader().load('./assets/city.jpg');
+    envTex.colorSpace = THREE.SRGBColorSpace;
+    envTex.mapping = THREE.EquirectangularReflectionMapping;
+  }
+  const S = new THREE.Matrix4().extractRotation(surfaceMatrix);
+  const M = new THREE.Matrix4().makeRotationY(-Math.PI / 2); // local -> env
+  const q = new THREE.Matrix4().multiplyMatrices(S, M.clone().transpose());
+  return { tex: envTex, rot: new THREE.Euler().setFromRotationMatrix(q) };
+}
+
 let glowTexCache = null;
 function plasterTexture() {
   if (glowTexCache) return glowTexCache;
@@ -236,7 +252,7 @@ function makeGlass(ow, oh, toLocal) {
         float hc = h21(vec2(col, 3.7));
         float y = uv.y / ch + t * (0.12 + 0.3 * hc) + hc * 40.0;
         vec2 id = vec2(col, floor(y));
-        if (h21(id) < 0.62) return vec3(0.0);
+        if (h21(id) < 0.7) return vec3(0.0);
         float fy = fract(y) - 0.5;
         float wob = sin(y * 7.0 + hc * 6.0) * 0.12 + sin(y * 17.0) * 0.04;
         float x0 = (h21(id + 2.0) - 0.5) * 0.4 + wob;
@@ -258,8 +274,8 @@ function makeGlass(ow, oh, toLocal) {
 
       void main() {
         vec3 dl = normalize(toLocal * vDir);
-        vec3 b1 = beads(vUv, 0.03, time, 0.0, 0.8);
-        vec3 b2 = beads(vUv, 0.07, time * 0.7, 17.0, 0.72);
+        vec3 b1 = beads(vUv, 0.035, time, 0.0, 0.9);
+        vec3 b2 = beads(vUv, 0.08, time * 0.7, 17.0, 0.85);
         vec3 rr = runners(vUv, time);
         vec2 n = b1.xy * b1.z + b2.xy * b2.z + rr.xy;
         float m = clamp(b1.z + b2.z + rr.z, 0.0, 1.0);
@@ -267,11 +283,13 @@ function makeGlass(ow, oh, toLocal) {
         vec3 rd = normalize(dl + vec3(-n * 0.35, 0.0));
         vec3 c = samplePano(pano, rd).rgb;
         float rim = dot(n, n);
-        c *= mix(1.15, 0.45, clamp(rim, 0.0, 1.0));
+        c *= mix(1.05, 0.7, clamp(rim, 0.0, 1.0));
         // faint glint on the top-left of each bead
         c += vec3(0.5, 0.45, 0.4) * smoothstep(0.55, 0.9, dot(normalize(n + 1e-4), vec2(-0.6, 0.8))) * rim * m * 0.25;
-        float glass = 0.07;
-        gl_FragColor = vec4(c * m, clamp(m * 0.95 + glass, 0.0, 1.0));
+        float glass = 0.04;
+        float a = m * 0.8;
+        // normal alpha blending does the mix; a faint dark tint stands in for the glass itself
+        gl_FragColor = vec4(c * a / max(a + glass, 1e-3), clamp(a + glass, 0.0, 1.0));
         #include <colorspace_fragment>
       }`,
     transparent: true,
@@ -362,34 +380,66 @@ export function buildCityWindow(w, h, seed = 1, surfaceMatrix = new THREE.Matrix
   shape.holes.push(hole);
   const surroundGeo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
   surroundGeo.translate(0, 0, -depth);
-  const surround = new THREE.Mesh(surroundGeo, [
-    new THREE.MeshBasicMaterial({ map: plasterTexture(), color: 0x3a3634 }), // wall face
-    new THREE.MeshBasicMaterial({ map: plasterTexture(), color: 0x55433a }), // reveal, warm from the city glow
-  ]);
+  // Everything near reflects the city: the panorama doubles as the environment map,
+  // rotated so "out the window" in the reflections matches the view.
+  const env = getEnv(surfaceMatrix);
+  const std = (o) => {
+    const m = new THREE.MeshStandardMaterial(o);
+    m.envMap = env.tex;
+    m.envMapRotation.copy(env.rot);
+    return m;
+  };
+  const plaster = std({ map: plasterTexture(), color: 0x6a645e, roughness: 0.92, metalness: 0, envMapIntensity: 0.5 });
+  const reveal = std({ map: plasterTexture(), color: 0x8a7a6e, roughness: 0.85, metalness: 0, envMapIntensity: 1.3 });
+  const surround = new THREE.Mesh(surroundGeo, [plaster, reveal]);
   local.add(surround);
 
-  // mullions + a sill rail, black anodised
-  const frameMat = new THREE.MeshBasicMaterial({ color: 0x08090b });
-  const panes = Math.max(1, Math.round(ow / 1.15));
-  const mz = -depth + 0.05;
-  for (let i = 1; i < panes; i++) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.05, oh, 0.07), frameMat);
-    m.position.set(-ow / 2 + (ow * i) / panes, 0, mz);
-    local.add(m);
-  }
-  const edge = (x, y, sx, sy) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, 0.07), frameMat);
-    m.position.set(x, y, mz);
+  // frame: dark bronze aluminium with rounded profiles, catching the city lights
+  const metal = std({ color: 0x7a6a5a, metalness: 1.0, roughness: 0.24, envMapIntensity: 1.5 });
+  const bar = (len, pw, pd) => {
+    const r = Math.min(pw, pd) * 0.28;
+    const sh = new THREE.Shape();
+    const x = -pw / 2, y = -pd / 2;
+    sh.moveTo(x + r, y); sh.lineTo(x + pw - r, y); sh.quadraticCurveTo(x + pw, y, x + pw, y + r);
+    sh.lineTo(x + pw, y + pd - r); sh.quadraticCurveTo(x + pw, y + pd, x + pw - r, y + pd);
+    sh.lineTo(x + r, y + pd); sh.quadraticCurveTo(x, y + pd, x, y + pd - r);
+    sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: len, bevelEnabled: false, curveSegments: 4 });
+    g.translate(0, 0, -len / 2);
+    return g;
+  };
+  const vbar = (x, y, len, pw, pd, z) => {
+    const m = new THREE.Mesh(bar(len, pw, pd), metal);
+    m.rotation.x = Math.PI / 2; // extrusion along y
+    m.position.set(x, y, z);
     local.add(m);
   };
-  const t = 0.04;
-  edge(0, oh / 2 - t / 2, ow, t);
-  edge(0, -oh / 2 + t / 2, ow, t);
-  edge(-ow / 2 + t / 2, 0, t, oh);
-  edge(ow / 2 - t / 2, 0, t, oh);
-  if (oh > 1.6) edge(0, -oh / 2 + Math.min(0.5, oh * 0.22), ow, 0.035);
-  const sill = new THREE.Mesh(new THREE.BoxGeometry(ow + 0.06, 0.03, depth + 0.1), new THREE.MeshBasicMaterial({ color: 0x2b2522 }));
-  sill.position.set(0, -oh / 2 + 0.015, -depth / 2 + 0.05);
+  const hbar = (x, y, len, pw, pd, z) => {
+    const m = new THREE.Mesh(bar(len, pd, pw), metal); // after the turn: profile x -> depth, y -> height
+    m.rotation.y = Math.PI / 2; // extrusion along x
+    m.position.set(x, y, z);
+    local.add(m);
+  };
+  const mz = -depth + 0.06;
+  const panes = Math.max(1, Math.round(ow / 1.15));
+  for (let i = 1; i < panes; i++) vbar(-ow / 2 + (ow * i) / panes, 0, oh, 0.055, 0.09, mz);
+  const t = 0.05;
+  hbar(0, oh / 2 - t / 2, ow, t, 0.1, mz);
+  hbar(0, -oh / 2 + t / 2, ow, t, 0.1, mz);
+  vbar(-ow / 2 + t / 2, 0, oh, t, 0.1, mz);
+  vbar(ow / 2 - t / 2, 0, oh, t, 0.1, mz);
+  if (oh > 1.6) hbar(0, -oh / 2 + Math.min(0.5, oh * 0.22), ow, 0.04, 0.08, mz);
+
+  // interior trim around the opening, flush with the room
+  const trimW = 0.05;
+  hbar(0, oh / 2 + trimW / 2, ow + trimW * 2, trimW, 0.025, 0.012);
+  vbar(-ow / 2 - trimW / 2, 0, oh, trimW, 0.025, 0.012);
+  vbar(ow / 2 + trimW / 2, 0, oh, trimW, 0.025, 0.012);
+
+  // stone sill that picks up reflections of the skyline
+  const stone = std({ color: 0x2e2a27, roughness: 0.16, metalness: 0, envMapIntensity: 1.4 });
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(ow + 0.14, 0.035, depth + 0.12), stone);
+  sill.position.set(0, -oh / 2 + 0.0175, -depth / 2 + 0.06);
   local.add(sill);
 
   // glass (drawn last, over the mid layer)
