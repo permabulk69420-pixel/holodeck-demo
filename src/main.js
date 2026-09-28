@@ -3,6 +3,7 @@ import { buildSurface, fakeRoomPolys } from './surfaces.js';
 import { allocRef, releaseRef, makeMask, stencilize, makeCubeWindow } from './portals.js';
 import { captureCube, buildMountains, buildStars } from './scenes/far.js';
 import { buildFishTank } from './scenes/fishtank.js';
+import { buildSpaceWindow } from './scenes/space.js';
 import { Picker } from './picker.js';
 
 const statusEl = document.getElementById('status');
@@ -50,6 +51,7 @@ const cubes = {
 }
 
 const OPTIONS = [
+  { id: 'space', title: 'Spaceship window', sub: 'Blender render + live 3D' },
   { id: 'mountains', title: 'Mountains', sub: 'far · cubemap' },
   { id: 'stars', title: 'Stars', sub: 'far · cubemap' },
   { id: 'fish', title: 'Fish tank', sub: 'near · live 3D' },
@@ -138,7 +140,16 @@ function assign(s, id) {
   const mask = makeMask(s.geometry, ref);
   mask.renderOrder = maskOrder(s);
   let content, update = null;
-  if (id === 'fish') {
+  if (id === 'space') {
+    const sw = buildSpaceWindow(s.width, s.height, ref);
+    sw.far.material.uniforms.toLocal.value.setFromMatrix4(s.matrix).transpose();
+    sw.local.matrixAutoUpdate = false;
+    sw.local.matrix.copy(s.matrix);
+    sw.local.matrixWorldNeedsUpdate = true;
+    content = new THREE.Group();
+    content.add(sw.far, sw.group);
+    update = sw.update;
+  } else if (id === 'fish') {
     const tank = buildFishTank(s.width, s.height, 2.4, ref);
     content = new THREE.Group();
     content.matrixAutoUpdate = false;
@@ -410,7 +421,7 @@ scene.background = new THREE.Color(0x1a1b21);
 // optional: preassign for quick looks, e.g. ?demo=1
 if (params.has('demo')) {
   const [back, right, , left, floor, ceiling] = surfaces;
-  assign(back, 'fish');
+  assign(back, params.get('back') || 'fish');
   assign(right, 'mountains');
   assign(left, 'fishStatic');
   assign(ceiling, 'stars');
@@ -446,7 +457,11 @@ renderer.setAnimationLoop((time, frame) => {
   // cube windows sit around the viewer so they behave like distant views
   for (const s of surfaces) {
     if (s.portal) s.portal.mask.renderOrder = maskOrder(s);
-    if (s.portal?.content?.userData.followCamera) s.portal.content.position.copy(viewerPos);
+    const c = s.portal?.content;
+    if (c) {
+      if (c.userData.followCamera) c.position.copy(viewerPos);
+      for (const k of c.children) if (k.userData.followCamera) k.position.copy(viewerPos);
+    }
   }
   for (const u of updaters) u(t);
 
