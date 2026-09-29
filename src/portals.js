@@ -43,7 +43,7 @@ export function stencilize(obj, ref) {
       m.stencilZFail = THREE.KeepStencilOp;
       m.stencilZPass = THREE.KeepStencilOp;
     }
-    o.renderOrder = 2;
+    o.renderOrder = o.userData.renderOrder ?? 2;
     o.frustumCulled = false;
   });
 }

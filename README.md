@@ -26,6 +26,14 @@ cut out to transparency (stored as WebP with alpha), composited in `src/scenes/p
 at the Space scene (`8p`) or the Sky islands (`7p`). Swap the exterior or turn it with the `buildLayeredPano(...)` line in the registry.
 The rest of the pack is not imported yet; the unprocessed uploads live in git history under `incoming/spaceship-bridge/`.
 
+## Oasis shore (`?room=oasis`)
+Two layers, composed by `composeLayers` in `src/scenes/layers.js`:
+- **Far:** `assets/oasis.jpg`, an 8192x4096 golden-hour capture of the Oasis game (`tools/celworld_capture/` pipeline, same six-face stitch), with all vegetation within 25 m stripped so it does not double with the live plants.
+- **Near ("floor box"):** `src/scenes/stage.js` lays a tiled sand floor that fades into the panorama's ground, then scatters the GLBs in `assets/oasis/` around the viewer (seeded, so every session matches). Each GLB is baked to merged geometry per material and drawn as InstancedMesh, with soft contact shadows and a sun matched to the panorama.
+- To add plants: drop a `.glb` in `assets/oasis/` and add a line to `kinds` in the registry (`count`, `scale`, `r` = distance range, `foot` = footprint in metres).
+- A birds layer can be another `composeLayers` argument with an `update(dt)`.
+- Note: the holodeck renderer has no tone mapping, so the near layer is lit by eye to match the pano.
+
 ## Adding a scene
 Drop the equirect image in `assets/` and add one entry to `src/scenes/registry.js` (`buildPano` for a plain panorama,
 `buildLayeredPano` for a transparent interior over another scene). The picker builds itself from that list.
