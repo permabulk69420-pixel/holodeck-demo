@@ -5,6 +5,7 @@ import { captureCube, buildMountains, buildStars } from './scenes/far.js';
 import { buildFishTank } from './scenes/fishtank.js';
 import { buildSpaceScene } from './scenes/space.js';
 import { buildCityScene } from './scenes/city.js';
+import { buildSkyScene } from './scenes/sky.js';
 import { Picker } from './picker.js';
 
 const statusEl = document.getElementById('status');
@@ -54,6 +55,7 @@ const cubes = {
 const OPTIONS = [
   { id: 'city', title: 'Night city', sub: '40th floor, rain · Blender + live 3D' },
   { id: 'space', title: 'Space', sub: 'ringed planet · Blender + live 3D' },
+  { id: 'sky', title: 'Sky islands', sub: 'golden hour above the clouds · Blender + live 3D' },
   { id: 'mountains', title: 'Mountains', sub: 'far · cubemap' },
   { id: 'stars', title: 'Stars', sub: 'far · cubemap' },
   { id: 'fish', title: 'Fish tank', sub: 'near · live 3D' },
@@ -118,7 +120,7 @@ function useFakeRoom(center) {
 // "front" out through the first surface it was put on, so every other wall shows its own
 // direction and a whole room can be opened up seamlessly. The fish tank is the exception:
 // it's a box behind one particular surface.
-const SHARED = new Set(['city', 'space', 'mountains', 'stars', 'fishStatic']);
+const SHARED = new Set(['city', 'space', 'sky', 'mountains', 'stars', 'fishStatic']);
 const shared = new Map(); // id -> { ref, content, update, users: Set<surface> }
 const updaters = new Set();
 
@@ -143,6 +145,7 @@ function getShared(id, s) {
   let content, update = null;
   if (id === 'city') ({ content, update } = buildCityScene(frame, ref));
   else if (id === 'space') ({ content, update } = buildSpaceScene(frame, ref));
+  else if (id === 'sky') ({ content, update } = buildSkyScene(frame, ref));
   else content = makeCubeWindow(cubes[id], frame);
   stencilize(content, ref);
   portalRoot.add(content);
