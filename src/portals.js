@@ -47,35 +47,3 @@ export function stencilize(obj, ref) {
     o.frustumCulled = false;
   });
 }
-
-// "Far" window: samples a pre-captured cubemap by view direction.
-// Leaning changes what you see through the window (like a real window onto a distant view),
-// but near and far things inside it don't shift against each other.
-// surfaceMatrix: the surface frame (right, up, normal). The captured scene's -Z is
-// mapped to "into the wall", so whatever was in front of the capture camera sits behind that wall.
-export function makeCubeWindow(cubeTexture, surfaceMatrix) {
-  const toLocal = new THREE.Matrix3().setFromMatrix4(surfaceMatrix).transpose();
-  const mat = new THREE.ShaderMaterial({
-    uniforms: { env: { value: cubeTexture }, toLocal: { value: toLocal } },
-    vertexShader: /* glsl */ `
-      varying vec3 vDir;
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vDir = wp.xyz - cameraPosition;
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }`,
-    fragmentShader: /* glsl */ `
-      uniform samplerCube env;
-      uniform mat3 toLocal;
-      varying vec3 vDir;
-      void main() {
-        gl_FragColor = textureCube(env, normalize(toLocal * vDir));
-        #include <colorspace_fragment>
-      }`,
-    side: THREE.BackSide,
-    depthWrite: false,
-  });
-  const box = new THREE.Mesh(new THREE.BoxGeometry(40, 40, 40), mat);
-  box.userData.followCamera = true;
-  return box;
-}

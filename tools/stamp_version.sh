@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 export V
 files=$(ls index.html; find src -name '*.js')
 # shellcheck disable=SC2086
-perl -0pi -e 's{([\x27"`])(\./[\w./-]+\.(?:m?js|jpg|jpeg|png|json))\1}{$1$2?v=$ENV{V}$1}g' $files
+perl -0pi -e 's{([\x27"`])(\./[\w./-]+\.(?:m?js|jpg|jpeg|png|webp|json))\1}{$1$2?v=$ENV{V}$1}g' $files
 # a small build tag so you can see which deploy you are on (desktop / phone)
 perl -0pi -e 's{</body>}{  <div id="build" style="position:fixed;right:8px;bottom:6px;opacity:.35;font:11px monospace;pointer-events:none">build $ENV{V}</div>\n</body>}' index.html
 echo "stamped $V"

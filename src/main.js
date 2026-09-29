@@ -1,12 +1,7 @@
 import * as THREE from 'three';
 import { buildSurface, fakeRoomPolys } from './surfaces.js';
-import { allocRef, releaseRef, makeMask, stencilize, makeCubeWindow } from './portals.js';
-import { captureCube, buildMountains, buildStars } from './scenes/far.js';
-import { buildFishTank } from './scenes/fishtank.js';
-import { buildSpaceScene } from './scenes/space.js';
-import { buildCityScene } from './scenes/city.js';
-import { buildCelworldScene } from './scenes/celworld.js';
-import { buildSkyScene } from './scenes/sky.js';
+import { allocRef, releaseRef, makeMask, stencilize } from './portals.js';
+import { SCENES } from './scenes/registry.js';
 import { Picker } from './picker.js';
 
 const statusEl = document.getElementById('status');
@@ -36,38 +31,15 @@ addEventListener('resize', () => {
 });
 
 // ---------- scene library ----------
-// Far scenes are captured once into cubemaps (six-sided camera capture).
-const mountains = buildMountains();
-const stars = buildStars();
-const cubes = {
-  mountains: captureCube(renderer, mountains.scene, mountains.eye),
-  stars: captureCube(renderer, stars.scene, stars.eye),
-};
-// For comparison: the fish tank captured as a cubemap, to see why near things need live 3D.
-{
-  const s = new THREE.Scene();
-  s.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.2));
-  const tank = buildFishTank(3, 2.2, 2.4, 3);
-  tank.update(4);
-  s.add(tank.group);
-  cubes.fishStatic = captureCube(renderer, s, new THREE.Vector3(0, 0, 1.6));
-}
-
-const OPTIONS = [
-  { id: 'city', title: 'Night city', sub: '40th floor, rain · Blender + live 3D' },
-  { id: 'space', title: 'Space', sub: 'ringed planet · Blender + live 3D' },
-  { id: 'sky', title: 'Sky islands', sub: 'golden hour above the clouds · Blender' },
-  { id: 'celworld', title: 'Celworld meadow', sub: 'Ghibli-style valley · captured from Celworld' },
-  { id: 'mountains', title: 'Mountains', sub: 'far · cubemap' },
-  { id: 'stars', title: 'Stars', sub: 'far · cubemap' },
-  { id: 'fish', title: 'Fish tank', sub: 'near · live 3D' },
-  { id: 'fishStatic', title: 'Fish tank', sub: 'as cubemap (compare)' },
+// Scenes live in scenes/registry.js. The picker lists them, then the controls below.
+const CONTROLS = [
   { id: 'follow', title: 'Same as wall', sub: 'use the wall\'s scene', childOnly: true },
   { id: 'justChild', title: 'Just this part', sub: 'only the window / door', withChild: true },
   { id: 'fillRoom', title: 'Fill whole room', sub: 'this scene on every surface', needsScene: true },
   { id: 'clear', title: 'Clear', sub: 'show the real thing' },
   { id: 'clearRoom', title: 'Clear whole room', sub: 'back to your room', needsScene: true },
 ];
+const OPTIONS = [...SCENES.map(({ id, title, sub }) => ({ id, title, sub })), ...CONTROLS];
 
 // ---------- surfaces ----------
 const surfaces = [];
@@ -117,12 +89,11 @@ function useFakeRoom(center) {
 }
 
 // ---------- portals ----------
-// Most scenes are SHARED: one copy per room, which every surface showing it looks into
+// Scenes are SHARED: one copy per room, which every surface showing it looks into
 // (all their stencil masks write the same value). The scene is locked to the room, with its
 // "front" out through the first surface it was put on, so every other wall shows its own
-// direction and a whole room can be opened up seamlessly. The fish tank is the exception:
-// it's a box behind one particular surface.
-const SHARED = new Set(['city', 'space', 'celworld', 'sky', 'mountains', 'stars', 'fishStatic']);
+// direction and a whole room can be opened up seamlessly.
+const SHARED = new Set(SCENES.map((sc) => sc.id));
 const shared = new Map(); // id -> { ref, content, update, users: Set<surface> }
 const updaters = new Set();
 
@@ -144,12 +115,8 @@ function getShared(id, s) {
   if (sh) return sh;
   const frame = sceneFrame(s);
   const ref = allocRef();
-  let content, update = null;
-  if (id === 'city') ({ content, update } = buildCityScene(frame, ref));
-  else if (id === 'space') ({ content, update } = buildSpaceScene(frame, ref));
-  else if (id === 'celworld') ({ content, update } = buildCelworldScene(frame));
-  else if (id === 'sky') ({ content, update } = buildSkyScene(frame, ref));
-  else content = makeCubeWindow(cubes[id], frame);
+  let content, update;
+  ({ content, update = null } = SCENES.find((sc) => sc.id === id).build(frame, ref));
   stencilize(content, ref);
   portalRoot.add(content);
   if (update) updaters.add(update);
@@ -209,20 +176,6 @@ function assign(s, id) {
     s.portal = { ref: sh.ref, mask, content: null, update: null, id, shared: true };
     return;
   }
-  // fish tank: its own box behind this surface
-  const ref = allocRef();
-  const mask = makeMask(s.geometry, ref);
-  mask.renderOrder = maskOrder(s);
-  const tank = buildFishTank(s.width, s.height, 2.4, ref);
-  const content = new THREE.Group();
-  content.matrixAutoUpdate = false;
-  content.matrix.copy(s.matrix);
-  content.matrixWorldNeedsUpdate = true;
-  content.add(tank.group);
-  stencilize(content, ref);
-  portalRoot.add(mask, content);
-  updaters.add(tank.update);
-  s.portal = { ref, mask, content, update: tank.update, id };
 }
 
 // Whole room: every wall, floor and ceiling shows the scene (doors/windows follow their wall).
@@ -508,10 +461,10 @@ scene.background = new THREE.Color(0x1a1b21);
 // optional: preassign for quick looks, e.g. ?demo=1
 if (params.has('demo')) {
   const [back, right, , left, floor, ceiling] = surfaces;
-  assign(back, params.get('back') || 'fish');
-  assign(right, 'mountains');
-  assign(left, 'fishStatic');
-  assign(ceiling, 'stars');
+  assign(back, params.get('back') || 'city');
+  assign(right, 'space');
+  assign(left, 'sky');
+  assign(ceiling, 'celworld');
   if (params.get('win')) assign(surfaces[6], params.get('win'));
 }
 // ?room=city opens the whole test room onto one scene
