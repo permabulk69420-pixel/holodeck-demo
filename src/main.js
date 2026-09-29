@@ -56,7 +56,7 @@ const cubes = {
 const OPTIONS = [
   { id: 'city', title: 'Night city', sub: '40th floor, rain · Blender + live 3D' },
   { id: 'space', title: 'Space', sub: 'ringed planet · Blender + live 3D' },
-  { id: 'sky', title: 'Sky islands', sub: 'golden hour above the clouds · Blender + live 3D' },
+  { id: 'sky', title: 'Sky islands', sub: 'golden hour above the clouds · Blender' },
   { id: 'celworld', title: 'Celworld meadow', sub: 'Ghibli-style valley · captured from Celworld' },
   { id: 'mountains', title: 'Mountains', sub: 'far · cubemap' },
   { id: 'stars', title: 'Stars', sub: 'far · cubemap' },

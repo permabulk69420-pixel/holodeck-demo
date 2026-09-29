@@ -38,6 +38,7 @@ scene.cycles.device = "CPU"
 scene.cycles.samples = max(SAMPLES, 1)
 scene.cycles.use_denoising = True
 scene.cycles.max_bounces = 4
+scene.cycles.transparent_max_bounces = 16
 scene.render.resolution_x = W
 scene.render.resolution_y = W // 2
 scene.render.resolution_percentage = 100
@@ -152,7 +153,33 @@ try:
     sky.sun_intensity = 1.6
 except Exception:
     pass
-link(wt, sky.outputs["Color"], bg.inputs["Color"])
+sunv = (math.sin(SUN_AZ) * math.cos(SUN_EL), math.cos(SUN_AZ) * math.cos(SUN_EL), math.sin(SUN_EL))
+wtc = wt.nodes.new("ShaderNodeTexCoord"); wtc.location = (-600, -300)
+wdot = wt.nodes.new("ShaderNodeVectorMath"); wdot.operation = "DOT_PRODUCT"; wdot.location = (-400, -300)
+wdot.inputs[1].default_value = sunv
+link(wt, wtc.outputs["Object"], wdot.inputs[0])
+wcl = wt.nodes.new("ShaderNodeMath"); wcl.operation = "MAXIMUM"; wcl.inputs[1].default_value = 0.0; wcl.location = (-250, -300)
+link(wt, wdot.outputs["Value"], wcl.inputs[0])
+wg1 = wt.nodes.new("ShaderNodeMath"); wg1.operation = "POWER"; wg1.inputs[1].default_value = 6.0; wg1.location = (-100, -250)
+link(wt, wcl.outputs[0], wg1.inputs[0])
+wg2 = wt.nodes.new("ShaderNodeMath"); wg2.operation = "POWER"; wg2.inputs[1].default_value = 90.0; wg2.location = (-100, -400)
+link(wt, wcl.outputs[0], wg2.inputs[0])
+wgs = wt.nodes.new("ShaderNodeMath"); wgs.operation = "MULTIPLY_ADD"; wgs.inputs[1].default_value = 1.0; wgs.location = (100, -300)
+wg2b = wt.nodes.new("ShaderNodeMath"); wg2b.operation = "MULTIPLY"; wg2b.inputs[1].default_value = 10.0; wg2b.location = (0, -400)
+link(wt, wg2.outputs[0], wg2b.inputs[0])
+wg1b = wt.nodes.new("ShaderNodeMath"); wg1b.operation = "MULTIPLY"; wg1b.inputs[1].default_value = 1.6; wg1b.location = (0, -250)
+link(wt, wg1.outputs[0], wg1b.inputs[0])
+wsum = wt.nodes.new("ShaderNodeMath"); wsum.operation = "ADD"; wsum.location = (200, -300)
+link(wt, wg1b.outputs[0], wsum.inputs[0]); link(wt, wg2b.outputs[0], wsum.inputs[1])
+wglow = wt.nodes.new("ShaderNodeMix"); wglow.data_type = "RGBA"; wglow.blend_type = "MULTIPLY"; wglow.location = (350, -300)
+wglow.inputs["Factor"].default_value = 1.0
+wglow.inputs["A"].default_value = (1.0, 0.5, 0.17, 1.0)
+link(wt, wsum.outputs[0], wglow.inputs["B"])
+wadd = wt.nodes.new("ShaderNodeMix"); wadd.data_type = "RGBA"; wadd.blend_type = "ADD"; wadd.location = (200, 0)
+wadd.inputs["Factor"].default_value = 1.0
+link(wt, sky.outputs["Color"], wadd.inputs["A"])
+link(wt, wglow.outputs["Result"], wadd.inputs["B"])
+link(wt, wadd.outputs["Result"], bg.inputs["Color"])
 bg.inputs["Strength"].default_value = 1.0
 link(wt, bg.outputs["Background"], wout.inputs["Surface"])
 
@@ -172,17 +199,17 @@ shade_smooth(sea)
 cm, ct = new_mat("cloud")
 tc = ct.nodes.new("ShaderNodeTexCoord"); tc.location = (-900, 0)
 cn = ct.nodes.new("ShaderNodeTexNoise"); cn.location = (-700, 0)
-cn.inputs["Scale"].default_value = 0.012
+cn.inputs["Scale"].default_value = 0.02
 cn.inputs["Detail"].default_value = 8
 link(ct, tc.outputs["Object"], cn.inputs["Vector"])
-cr = ramp(ct, [(0.3, (0.62, 0.5, 0.62, 1)), (0.55, (1.0, 0.8, 0.66, 1)), (0.8, (1.0, 0.96, 0.88, 1))], (-450, 0))
+cr = ramp(ct, [(0.36, (0.42, 0.32, 0.5, 1)), (0.5, (0.95, 0.66, 0.5, 1)), (0.62, (1.0, 0.88, 0.72, 1)), (0.75, (1.0, 0.98, 0.93, 1))], (-450, 0))
 link(ct, cn.outputs["Fac"], cr.inputs["Fac"])
 cd = ct.nodes.new("ShaderNodeBsdfDiffuse"); cd.location = (0, 100)
 link(ct, cr.outputs["Color"], cd.inputs["Color"])
 ctl = ct.nodes.new("ShaderNodeBsdfTranslucent"); ctl.location = (0, -100)
 link(ct, cr.outputs["Color"], ctl.inputs["Color"])
 cmix = ct.nodes.new("ShaderNodeMixShader"); cmix.location = (250, 0)
-cmix.inputs["Fac"].default_value = 0.7
+cmix.inputs["Fac"].default_value = 0.5
 link(ct, cd.outputs["BSDF"], cmix.inputs[1])
 link(ct, ctl.outputs["BSDF"], cmix.inputs[2])
 finish_with_haze(ct, cmix.outputs["Shader"], None, base=(650, 0))
@@ -197,7 +224,7 @@ for cl in range(70):
     ang = rng.uniform(0, math.tau)
     dist = 90 + (rng.random() ** 0.75) * 1700
     cx, cy = math.cos(ang) * dist, math.sin(ang) * dist
-    base_r = rng.uniform(16, 34) * (0.7 + dist / 1100.0)
+    base_r = rng.uniform(24, 48) * (0.7 + dist / 1100.0)
     for k in range(rng.randint(5, 9)):
         r = base_r * rng.uniform(0.5, 1.1)
         x = cx + rng.uniform(-1.4, 1.4) * base_r
@@ -254,7 +281,7 @@ finish_with_haze(gt, gb.outputs["BSDF"], None, base=(400, 100))
 
 falls_m, ft = new_mat("waterfall")
 fb = ft.nodes.new("ShaderNodeBsdfDiffuse"); fb.inputs["Color"].default_value = (0.85, 0.95, 1.0, 1)
-fe = ft.nodes.new("ShaderNodeEmission"); fe.inputs["Color"].default_value = (0.8, 0.92, 1.0, 1); fe.inputs["Strength"].default_value = 0.6
+fe = ft.nodes.new("ShaderNodeEmission"); fe.inputs["Color"].default_value = (0.8, 0.92, 1.0, 1); fe.inputs["Strength"].default_value = 0.7
 fadd = ft.nodes.new("ShaderNodeAddShader")
 link(ft, fb.outputs["BSDF"], fadd.inputs[0])
 link(ft, fe.outputs["Emission"], fadd.inputs[1])
@@ -262,11 +289,24 @@ ftr = ft.nodes.new("ShaderNodeBsdfTransparent")
 # fade the fall out towards its bottom using the object-space Z of the strip
 ftc = ft.nodes.new("ShaderNodeTexCoord")
 ftz = ft.nodes.new("ShaderNodeSeparateXYZ")
-link(ft, ftc.outputs["Generated"], ftz.inputs["Vector"])
-ffade = ramp(ft, [(0.0, (0, 0, 0, 1)), (0.35, (0.5, 0.5, 0.5, 1)), (1.0, (0.9, 0.9, 0.9, 1))])
-link(ft, ftz.outputs["Z"], ffade.inputs["Fac"])
+link(ft, ftc.outputs["Generated"], ftz.inputs["Vector"])  # plane is flat in XY: Y runs along the fall
+ffade = ramp(ft, [(0.0, (0, 0, 0, 1)), (0.55, (0.3, 0.3, 0.3, 1)), (1.0, (0.85, 0.85, 0.85, 1))])
+link(ft, ftz.outputs["Y"], ffade.inputs["Fac"])
+fmap = ft.nodes.new("ShaderNodeMapping"); fmap.inputs["Scale"].default_value = (60.0, 3.0, 1.0)
+link(ft, ftc.outputs["Generated"], fmap.inputs["Vector"])
+fstreak = ft.nodes.new("ShaderNodeTexNoise"); fstreak.inputs["Detail"].default_value = 4
+link(ft, fmap.outputs["Vector"], fstreak.inputs["Vector"])
+fs_r = ramp(ft, [(0.3, (0.15, 0.15, 0.15, 1)), (0.65, (1, 1, 1, 1))])
+link(ft, fstreak.outputs["Fac"], fs_r.inputs["Fac"])
+fmulfade = ft.nodes.new("ShaderNodeMath"); fmulfade.operation = "MULTIPLY"
+link(ft, ffade.outputs["Color"], fmulfade.inputs[0]); link(ft, fs_r.outputs["Color"], fmulfade.inputs[1])
+# soft edges across the width
+fedge = ramp(ft, [(0.0, (0, 0, 0, 1)), (0.2, (1, 1, 1, 1)), (0.8, (1, 1, 1, 1)), (1.0, (0, 0, 0, 1))])
+link(ft, ftz.outputs["X"], fedge.inputs["Fac"])
+fmul2 = ft.nodes.new("ShaderNodeMath"); fmul2.operation = "MULTIPLY"
+link(ft, fmulfade.outputs[0], fmul2.inputs[0]); link(ft, fedge.outputs["Color"], fmul2.inputs[1])
 fmix = ft.nodes.new("ShaderNodeMixShader")
-link(ft, ffade.outputs["Color"], fmix.inputs["Fac"])
+link(ft, fmul2.outputs[0], fmix.inputs["Fac"])
 link(ft, ftr.outputs["BSDF"], fmix.inputs[1])
 link(ft, fadd.outputs["Shader"], fmix.inputs[2])
 finish_with_haze(ft, fmix.outputs["Shader"], None, base=(500, 0))
@@ -278,9 +318,9 @@ finish_with_haze(tt, tb.outputs["BSDF"], None, base=(300, 0))
 island_info = []
 
 
-def make_island(name, loc, radius, depth, top_h, tilt=0.0):
+def make_island(name, loc, radius, depth, top_h, tilt=0.0, subdiv=5, detail=True):
     seed = rng.random() * 100
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=5, radius=1.0, location=loc)
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=subdiv, radius=1.0, location=loc)
     o = bpy.context.active_object
     o.name = name
     me = o.data
@@ -320,7 +360,7 @@ def make_island(name, loc, radius, depth, top_h, tilt=0.0):
 
     # trees: dark cones scattered on the top
     trees = []
-    for i in range(int(radius * 1.6)):
+    for i in range(int(radius * 1.6) if detail else 0):
         a = rng.uniform(0, math.tau)
         rr = radius * math.sqrt(rng.random()) * 0.78
         h = rng.uniform(radius * 0.09, radius * 0.2)
@@ -330,16 +370,19 @@ def make_island(name, loc, radius, depth, top_h, tilt=0.0):
         c.data.materials.append(tree_m)
         trees.append(c)
 
-    # waterfall: a thin tapered ribbon dropping from the rim into the mist
+    if not detail:
+        island_info.append({"name": name, "x": loc[0], "y": loc[1], "z": loc[2], "radius": radius, "depth": depth})
+        return o
+    # waterfall: a ribbon dropping from the rim into the mist
     a = rng.uniform(0, math.tau)
     rim = radius * 0.86
     fx, fy = loc[0] + math.cos(a) * rim, loc[1] + math.sin(a) * rim
     fall_len = depth * rng.uniform(1.5, 2.6)
-    wd = radius * 0.05
+    wd = radius * 0.16
     bpy.ops.mesh.primitive_plane_add(size=1, location=(fx, fy, loc[2] + top_h * 0.4 - fall_len / 2))
     f = bpy.context.active_object
     f.name = name + "_fall"
-    f.scale = (wd, 1, fall_len)
+    f.scale = (wd, fall_len, 1)
     f.rotation_euler = (math.radians(90), 0, a + math.pi / 2)
     bpy.ops.object.transform_apply(scale=True, rotation=False)
     bm = bmesh.new()
@@ -348,6 +391,9 @@ def make_island(name, loc, radius, depth, top_h, tilt=0.0):
     bm.to_mesh(f.data)
     bm.free()
     f.data.materials.append(falls_m)
+    wt_ = bpy.data.textures.new(name + "_w", "CLOUDS"); wt_.noise_scale = 0.4
+    wm = f.modifiers.new("w", "DISPLACE"); wm.texture = wt_; wm.strength = wd * 0.6; wm.mid_level = 0.5
+    shade_smooth(f)
 
     island_info.append({
         "name": name,
@@ -373,10 +419,25 @@ SPEC = [
     (100, 560, 110, 160, 20),
     (-135, 700, 130, 170, 45),
 ]
+SPEC += [
+    (-42, 125, 20, 34, 2),
+    (48, 115, 18, 30, 14),
+    (138, 135, 24, 40, -8),
+    (-100, 110, 16, 28, 18),
+    (185, 150, 26, 44, 10),
+]
 for i, (az, dist, rad, dep, hz) in enumerate(SPEC):
     a = math.radians(az)
     x, y = math.sin(a) * dist, math.cos(a) * dist
-    make_island(f"island{i}", (x, y, hz), rad, dep, rad * 0.26, tilt=0.06)
+    make_island(f"island{i}", (x, y, hz), rad, dep, rad * 0.26, tilt=0.06, subdiv=6 if dist < 400 else 5)
+
+# floating debris: small rocks drifting around us at all heights (baked in, not live)
+for i in range(70):
+    az = rng.uniform(0, math.tau)
+    dist = rng.uniform(35, 320)
+    hz = rng.uniform(-40, 90)
+    rad = rng.uniform(1.5, 7.0) * (0.6 + dist / 300.0)
+    make_island(f"debris{i}", (math.sin(az) * dist, math.cos(az) * dist, hz), rad, rad * rng.uniform(1.2, 2.0), rad * 0.25, tilt=0.5, subdiv=3, detail=False)
 
 with open(out.rsplit(".", 1)[0] + ".json", "w") as fh:
     json.dump({"islands": island_info, "sun": {"az_from_y_cw_deg": math.degrees(SUN_AZ), "el_deg": math.degrees(SUN_EL)}}, fh, indent=1)
