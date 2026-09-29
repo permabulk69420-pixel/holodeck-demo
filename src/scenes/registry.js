@@ -1,3 +1,4 @@
+import { buildSanctuaryScene } from './sanctuary.js';
 import { buildCityScene } from './city.js';
 import { buildSpaceScene } from './space.js';
 import { buildPano, buildLayeredPano } from './pano.js';
@@ -10,6 +11,8 @@ import { composeLayers } from './layers.js';
 //   group  for the picker's ordering/grouping
 //   build(frame, ref)  returns { content, update }; frame = the scene's front frame in the room
 export const SCENES = [
+  { id: 'sanctuary', group: 'Fantasy', title: 'Sunken sanctuary', sub: 'ancient ruins · luminous cavern lake',
+    build: (frame) => buildSanctuaryScene(frame) },
   { id: 'city', group: 'Cities', title: 'Night city', sub: '40th floor, rain · Blender + live 3D',
     build: (frame, ref) => buildCityScene(frame, ref) },
   { id: 'space', group: 'Space', title: 'Space', sub: 'ringed planet · Blender + live 3D',

@@ -38,3 +38,12 @@ Two layers, composed by `composeLayers` in `src/scenes/layers.js`:
 Drop the equirect image in `assets/` and add one entry to `src/scenes/registry.js` (`buildPano` for a plain panorama,
 `buildLayeredPano` for a transparent interior over another scene). The picker builds itself from that list.
 The old three.js placeholder scenes (mountains, stars, fish tank) were removed.
+
+## Sunken sanctuary (`?room=sanctuary`)
+A frameless 4096×2048 Blender/Cycles panorama of a flooded cavern and illuminated ruins,
+with a small live firefly layer for motion and stereo depth. Select it on a wall, then
+choose **Fill whole room** to surround the room.
+
+The completed panorama is `assets/sanctuary.jpg`; no rendering is needed to use it.
+Reproduction source is `tools/render_sanctuary.py` (Python 3.11 with `bpy==4.5.3`):
+`python tools/render_sanctuary.py assets/sanctuary.jpg 4096 32`.
